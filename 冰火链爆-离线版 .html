@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>冰火链爆</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:100%; height:100%; overflow:hidden; background:#05060d; }
+  body { font-family:system-ui,-apple-system,"Segoe UI",sans-serif; color:#eaf1ff; user-select:none; touch-action:none; }
+  #game { position:fixed; inset:0; display:block; cursor:crosshair; }
+  .hud { position:fixed; top:12px; left:14px; right:14px; display:flex; justify-content:space-between; align-items:flex-start; font-weight:700; z-index:5; pointer-events:none; }
+  .col { display:flex; flex-direction:column; gap:6px; text-shadow:0 0 12px rgba(0,0,0,.9); }
+  .badge { font-size:12px; letter-spacing:.06em; opacity:.85; }
+  .big { font-size:24px; }
+  .fire { color:#ffab3c; } .ice { color:#57d2ff; }
+  .bar { width:160px; height:8px; border-radius:6px; background:rgba(255,255,255,.12); overflow:hidden; }
+  .bar > i { display:block; height:100%; width:0%; }
+  .hp i { background:linear-gradient(90deg,#ff5b6e,#ffab3c); }
+  .reso i { background:linear-gradient(90deg,#57d2ff,#8a7bff,#ffab3c); }
+  .combo { font-size:18px; color:#ffe27a; }
+  .center { position:fixed; inset:0; display:none; align-items:center; justify-content:center; flex-direction:column;
+            background:radial-gradient(circle at 50% 40%, rgba(16,14,34,.5), rgba(5,6,13,.94)); z-index:20; pointer-events:auto; }
+  .center.show { display:flex; }
+  .title { font-size:40px; font-weight:900; text-align:center;
+           background:linear-gradient(90deg,#57d2ff,#fff,#ffab3c); -webkit-background-clip:text; background-clip:text; color:transparent;
+           filter:drop-shadow(0 0 26px rgba(90,150,255,.45)); }
+  .sub { opacity:.75; margin-top:10px; font-size:14px; text-align:center; max-width:80vw; }
+  .cards { display:flex; gap:12px; margin-top:24px; flex-wrap:wrap; justify-content:center; max-width:92vw; }
+  .card { width:184px; padding:18px 14px; border-radius:16px; cursor:pointer; text-align:center;
+          background:rgba(14,14,32,.74); border:1px solid rgba(120,140,255,.28); transition:transform .12s, box-shadow .12s, border-color .12s; }
+  .card:hover { transform:translateY(-6px) scale(1.03); border-color:#ffab3c; box-shadow:0 0 30px rgba(255,150,60,.35); }
+  .card .ic { font-size:28px; margin-bottom:8px; }
+  .card .nm { font-weight:800; font-size:15px; margin-bottom:5px; }
+  .card .ds { font-size:12px; opacity:.72; line-height:1.5; }
+  .btn { margin-top:24px; cursor:pointer; padding:12px 28px; border:none; border-radius:999px;
+         font-size:16px; font-weight:800; color:#05060d; background:linear-gradient(90deg,#57d2ff,#8a7bff,#ffab3c); box-shadow:0 8px 30px rgba(110,130,255,.4); }
+  .btn:active { transform:scale(.96); }
+  .tip { position:fixed; bottom:10px; width:100%; text-align:center; font-size:12px; opacity:.5; z-index:5; pointer-events:none; }
+  .flash { position:fixed; inset:0; background:#fff; opacity:0; pointer-events:none; z-index:15; }
+  .rank { font-size:17px; margin-top:14px; letter-spacing:.05em; }
+  .charge { position:fixed; bottom:34px; left:50%; transform:translateX(-50%); width:220px; height:9px; border-radius:6px; background:rgba(255,255,255,.12); overflow:hidden; z-index:5; pointer-events:none; }
+  .charge > i { display:block; height:100%; width:100%; background:linear-gradient(90deg,#57d2ff,#8a7bff); transition:width .06s linear; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div class="hud">
+  <div class="col">
+    <div class="badge">存活 <span class="big" id="time">0</span>s</div>
+    <div class="bar hp"><i id="hp"></i></div>
+    <div class="bar reso"><i id="reso"></i></div>
+  </div>
+  <div class="col" style="align-items:flex-end">
+    <div class="badge">连爆 <span class="big fire" id="kills">0</span></div>
+    <div class="badge combo" id="combo"></div>
+    <div class="badge ice" id="lv">阶 · 1</div>
+  </div>
+</div>
+<div class="charge"><i id="cd"></i></div>
+<div class="tip">移动鼠标 / 手指拖动瞄准 · 点击 / 抬手发射 · WASD 挪动气核 · 弹珠会在敌群间连锁跳爆 · P 暂停</div>
+<div class="flash" id="flash"></div>
+<div class="center" id="over">
+  <div class="title">链 爆 止 息</div>
+  <div class="sub" id="result"></div>
+  <div class="rank" id="rank"></div>
+  <button class="btn" id="again">再链一局</button>
+</div>
+<div class="center" id="pick">
+  <div class="title" style="font-size:28px">链爆回响 · 择其一</div>
+  <div class="cards" id="cards"></div>
+</div>
+<script>
+(function(){
+  var cv=document.getElementById('game'), g=cv.getContext('2d');
+  var W=0,H=0,DPR=Math.min(window.devicePixelRatio||1,2);
+  function resize(){ W=window.innerWidth||document.documentElement.clientWidth||800; H=window.innerHeight||document.documentElement.clientHeight||600; cv.width=Math.floor(W*DPR); cv.height=Math.floor(H*DPR); g.setTransform(DPR,0,0,DPR,0,0); }
+  window.addEventListener('resize',resize); resize();
+  function el(id){ return document.getElementById(id); }
+  var rnd=Math.random, PI=Math.PI, TAU=PI*2;
+  function rr(a,b){ return a+rnd()*(b-a); }
+
+  var P, balls, enemies, parts, rings, lines, floats;
+  var spawnT, elapsed, kills, combo, maxCombo, comboT;
+  var keys={}, paused=false, dead=false, shake=0, tPrev=0, upLv=0, nextUp=12, inFull=false, pendingFull=false;
+  var aim={x:0,y:0,active:false}, fireCd=0, parity=0, dtg=0;
+
+  var ICE=198, FIRE=32;
+
+  var UPG=[
+    {ic:'→',nm:'远链',ds:'弹珠可跳得更远，串得更长',ap:function(){P.jump*=1.3;}},
+    {ic:'✳',nm:'裂弹',ds:'命中时有概率分裂出新弹珠',ap:function(){P.split+=0.22;}},
+    {ic:'❂',nm:'连发',ds:'一次发射 +1 团弹珠（扇形）',ap:function(){P.shots+=1;}},
+    {ic:'⚡',nm:'急速蓄能',ds:'发射冷却 -22%',ap:function(){P.cd*=0.78;}},
+    {ic:'✸',nm:'溅射',ds:'每次命中的爆炸范围更大',ap:function(){P.splash*=1.4;}},
+    {ic:'✷',nm:'递增',ds:'弹珠每跳一次伤害递增',ap:function(){P.ramp+=0.25;}},
+    {ic:'☄',nm:'相变增幅',ds:'冰火异极命中的相变爆炸更大',ap:function(){P.phase*=1.5;}},
+    {ic:'➤',nm:'疾弹',ds:'弹珠飞行速度 +28%',ap:function(){P.bspeed*=1.28;}},
+    {ic:'❤',nm:'链核之躯',ds:'生命上限 +30% 并回复',ap:function(){P.maxHp*=1.3;P.hp=Math.min(P.maxHp,P.hp+P.maxHp*0.4);}},
+    {ic:'☄',nm:'连锁之王',ds:'单条弹道可跳的次数上限提升',ap:function(){P.maxJump+=4;}},
+    {ic:'❄',nm:'双极',ds:'相变爆炸也会引爆周围敌人',ap:function(){P.chainBoom=true;}}
+  ];
+
+  function reset(){
+    P={x:W/2,y:H/2,r:22,speed:260,hp:100,maxHp:100,jump:340,split:0,shots:1,cd:0.38,splash:62,ramp:0,phase:90,bspeed:1050,maxJump:7,chainBoom:false,reso:0,resoMax:100};
+    balls=[]; enemies=[]; parts=[]; rings=[]; lines=[]; floats=[];
+    spawnT=0; elapsed=0; kills=0; combo=0; maxCombo=0; comboT=0; fireCd=0; parity=0; upLv=0; nextUp=12;
+    dead=false; paused=false; shake=0;
+    el('over').className='center'; el('pick').className='center';
+    el('charge').style.opacity=1;
+  }
+
+  function spawnEnemy(){
+    var edge=(rnd()*4)|0, x,y;
+    if(edge===0){x=rr(-20,W+20);y=-20;} else if(edge===1){x=W+20;y=rr(-20,H+20);}
+    else if(edge===2){x=rr(-20,W+20);y=H+20;} else {x=-20;y=rr(-20,H+20);}
+    var big= elapsed>28 && rnd()>0.9;
+    enemies.push({x:x,y:y,r:big?26:14,sp:(big?34:62)+elapsed*1.0,seed:rr(0,TAU),big:big,hp:big?3:1,flash:0,pol:rnd()>0.5?'ice':'fire'});
+  }
+
+  function addGas(x,y,hue,count,pow){ for(var i=0;i<count;i++) parts.push({x:x,y:y,vx:rr(-1,1)*(pow||50),vy:rr(-1,1)*(pow||50),r:rr(5,17),hue:hue,life:1,decay:rr(1.3,2.6)}); }
+  function addRing(x,y,R,hue){ rings.push({x:x,y:y,r:6,R:R,hue:hue,life:1}); }
+  function addLine(x1,y1,x2,y2,hue){ lines.push({x1:x1,y1:y1,x2:x2,y2:y2,hue:hue,life:1}); }
+  function flash(){ var f=el('flash'); f.style.transition='none'; f.style.opacity='0.5'; requestAnimationFrame(function(){ f.style.transition='opacity .3s'; f.style.opacity='0'; }); }
+
+  function killEnemy(e){ if(!e)return; var kk=enemies.indexOf(e); if(kk<0)return; enemies.splice(kk,1); kills++; combo++; comboT=1.6; if(combo>maxCombo)maxCombo=combo;
+    var hue=e.pol==='ice'?FIRE:ICE; // 死时迸出相变色
+    addGas(e.x,e.y,hue,e.big?12:6,60); addRing(e.x,e.y,e.r*3,hue);
+    P.reso=Math.min(P.resoMax,P.reso+(e.big?14:4));
+    if(P.reso>=P.resoMax && !inFull) pendingFull=true;
+  }
+
+  function boom(x,y,R,hue,dmg){ addRing(x,y,R,hue); addGas(x,y,hue,8,70);
+    for(var i=enemies.length-1;i>=0;i--){ var e=enemies[i]; if(Math.hypot(e.x-x,e.y-y)<R){ e.hp-=dmg; e.flash=0.18; if(e.hp<=0) killEnemy(e,i); } }
+  }
+
+  function fullChain(){ // 风暴：全屏连锁引爆一大圈
+    if(inFull) return; inFull=true;
+    P.reso=0; flash(); shake=34; addRing(P.x,P.y,Math.max(W,H)*0.7,ICE); addRing(P.x,P.y,Math.max(W,H)*0.55,FIRE);
+    for(var i=enemies.length-1;i>=0;i--){ var e=enemies[i]; if(Math.hypot(e.x-P.x,e.y-P.y)<Math.max(W,H)*0.6){ addGas(e.x,e.y,e.pol==='ice'?ICE:FIRE,5,60); addLine(P.x,P.y,e.x,e.y,e.pol==='ice'?ICE:FIRE); killEnemy(e); } }
+    inFull=false; pendingFull=false;
+  }
+
+  function hurt(d){ if(P.inv>0)return; P.hp-=d; P.inv=0.7; shake=Math.min(24,shake+9); if(P.hp<=0){P.hp=0;die();} }
+  function die(){ if(dead)return; dead=true; addGas(P.x,P.y,ICE,40,90); addGas(P.x,P.y,FIRE,40,90); shake=44;
+    setTimeout(function(){ var t=Math.floor(elapsed);
+      el('result').textContent='存活 '+t+' 秒 · 连爆 '+kills+' 团 · 最高连锁 ×'+maxCombo;
+      el('rank').textContent='评定 · '+rank(t,kills); el('over').className='center show'; el('charge').style.opacity=0;
+    },700);
+  }
+  function rank(t,k){ var s=k*1.3+t*3; if(s>4600)return '链爆之主'; if(s>2600)return '冰火连皇'; if(s>1400)return '深渊行者'; if(s>700)return '连锁猎手'; return '余烬求生者'; }
+
+  function offerUp(){
+    var pool=UPG.slice(), pick=[]; for(var i=0;i<3&&pool.length;i++) pick.push(pool.splice((rnd()*pool.length)|0,1)[0]);
+    var box=el('cards'); box.innerHTML='';
+    pick.forEach(function(u){ var d=document.createElement('div'); d.className='card';
+      d.innerHTML='<div class="ic">'+u.ic+'</div><div class="nm">'+u.nm+'</div><div class="ds">'+u.ds+'</div>';
+      d.onclick=function(){ u.ap(); upLv++; el('lv').textContent='阶 · '+(upLv+1); el('pick').className='center'; paused=false; };
+      box.appendChild(d); });
+    el('pick').className='center show'; paused=true;
+  }
+
+  function nearest(from, exclude, maxD){
+    var best=null, bd=maxD*maxD;
+    for(var i=0;i<enemies.length;i++){ var e=enemies[i]; if(exclude.indexOf(e)>=0)continue;
+      var d=(e.x-from.x)*(e.x-from.x)+(e.y-from.y)*(e.y-from.y);
+      if(d<bd){ bd=d; best=e; } }
+    return best;
+  }
+
+  function fire(){
+    if(fireCd>0 || dead || paused) return;
+    var ax=aim.x, ay=aim.y;
+    if(!aim.active && enemies.length){ // 键盘：朝最近敌
+      var t=nearest({x:P.x,y:P.y},[],1e9); if(t){ ax=t.x; ay=t.y; } else { ax=P.x+1; ay=P.y; }
+    }
+    var baseAng=Math.atan2(ay-P.y, ax-P.x);
+    for(var s=0;s<P.shots;s++){
+      var off=(s-(P.shots-1)/2)*0.28;
+      var ang=baseAng+off;
+      var kind=(parity+s)%2===0?'ice':'fire';
+      // 第一跳目标：朝该角度最近的敌
+      var first=nearest({x:P.x,y:P.y},[],P.jump);
+      if(!first){ // 用瞄准射线兜底方向
+        first=null;
+      }
+      balls.push({x:P.x,y:P.y,kind:kind,hit:[],target:first,tx:P.x+Math.cos(ang)*1000,ty:P.y+Math.sin(ang)*1000,jumps:0,alive:true,trail:[],dmg:1,dmgBase:1,ttl:2.4});
+      addGas(P.x,P.y, kind==='ice'?ICE:FIRE, 4, 90);
+    }
+    parity=(parity+1)%2;
+    fireCd=P.cd;
+    if(!aim.active) aim.x=P.x+1, aim.y=P.y;
+  }
+
+  function update(dt){
+    var dx=0,dy=0;
+    if(keys['a']||keys['arrowleft'])dx--; if(keys['d']||keys['arrowright'])dx++;
+    if(keys['w']||keys['arrowup'])dy--; if(keys['s']||keys['arrowdown'])dy++;
+    if(dx||dy){ var m=Math.hypot(dx,dy); P.x+=dx/m*P.speed*dt; P.y+=dy/m*P.speed*dt; }
+    P.x=Math.max(16,Math.min(W-16,P.x)); P.y=Math.max(16,Math.min(H-16,P.y));
+    if(comboT>0){ comboT-=dt; if(comboT<=0)combo=0; }
+    if(fireCd>0)fireCd-=dt;
+    // 生成
+    var rate=Math.max(0.07, 0.42 - elapsed*0.02);
+    var cap=Math.min(360, 60+elapsed*5.0);
+    spawnT-=dt; if(spawnT<=0 && enemies.length<cap){ var b=1+(elapsed>14?1:0)+(elapsed>38?1:0)+(elapsed>65?1:0); for(var z=0;z<b;z++)spawnEnemy(); spawnT=rate; }
+    if(elapsed>=nextUp){ nextUp+=Math.max(12,20-upLv*1.0); offerUp(); }
+    // 弹珠链跳
+    for(var bi=balls.length-1;bi>=0;bi--){ var b=balls[bi];
+      if(!b.target){ b.target=nearest(b, b.hit, P.jump); }
+      if(!b.target){ b.ttl-=dt*2; b.x+= (b.tx-b.x)*Math.min(1,dt*3); b.y+=(b.ty-b.y)*Math.min(1,dt*3); if(b.ttl<=0){ balls.splice(bi,1); continue; } }
+      else {
+        var sp=P.bspeed*dt;
+        var ang=Math.atan2(b.target.y-b.y, b.target.x-b.x);
+        b.x+=Math.cos(ang)*sp; b.y+=Math.sin(ang)*sp;
+        b.trail.push({x:b.x,y:b.y}); if(b.trail.length>14)b.trail.shift();
+        if(Math.hypot(b.target.x-b.x,b.target.y-b.y) < b.target.r+6){
+          var e=b.target; b.hit.push(e); addLine(b.x,b.y,e.x,e.y, b.kind==='ice'?ICE:FIRE);
+          var opposite = (b.kind!==e.pol);
+          var dmg = b.dmgBase*(1+P.ramp*b.jumps);
+          e.hp-=dmg; e.flash=0.2;
+          b.jumps++; combo++; comboT=1.6; if(combo>maxCombo)maxCombo=combo;
+          var hue = opposite?285:(b.kind==='ice'?ICE:FIRE);
+          addGas(e.x,e.y,hue,6,60); addRing(e.x,e.y,P.splash*(opposite?1.6:1),hue);
+          P.reso=Math.min(P.resoMax,P.reso+3);
+          // 溅射 / 相变爆炸
+          var R=P.splash*(opposite?1.8:1);
+          for(var ei=enemies.length-1;ei>=0;ei--){ var o=enemies[ei]; if(o===e)continue;
+            if(Math.hypot(o.x-e.x,o.y-e.y)<R){ o.hp-=dmg*(opposite?1.4:0.6); o.flash=0.15; if(o.hp<=0)killEnemy(o); } }
+          if(P.chainBoom && opposite){ for(var cj=enemies.length-1;cj>=0;cj--){ var c=enemies[cj]; if(c===e)continue; if(Math.hypot(c.x-e.x,c.y-e.y)<R*1.4){ c.hp-=dmg; if(c.hp<=0)killEnemy(c); } } }
+          if(e.hp<=0){ killEnemy(e); }
+          // 分裂
+          if(rnd()<P.split && balls.length<40){ balls.push({x:e.x,y:e.y,kind:b.kind==='ice'?'fire':'ice',hit:b.hit.slice(),target:null,tx:e.x,ty:e.y,jumps:b.jumps,alive:true,trail:[],dmg:1,dmgBase:b.dmgBase,ttl:2.4}); }
+          if(b.jumps>=P.maxJump){ b.alive=false; }
+          b.target=null;
+        }
+        if(!b.alive){ balls.splice(bi,1); continue; }
+      }
+    }
+    // 敌人逼近
+    for(var i=enemies.length-1;i>=0;i--){ var en=enemies[i];
+      var ex=P.x-en.x,ey=P.y-en.y,ed=Math.hypot(ex,ey)||1;
+      en.x+=ex/ed*en.sp*dt; en.y+=ey/ed*en.sp*dt; en.seed+=dt*2; if(en.flash>0)en.flash-=dt;
+      if(ed<en.r+P.r*0.6){ hurt(en.big?18:9); addGas(en.x,en.y,0,6,50); enemies.splice(i,1); }
+    }
+    // 粒子/环/线
+    for(var p=parts.length-1;p>=0;p--){ var pt=parts[p]; pt.x+=pt.vx*dt; pt.y+=pt.vy*dt; pt.vx*=0.9; pt.vy*=0.9; pt.life-=pt.decay*dt; if(pt.life<=0)parts.splice(p,1); }
+    if(parts.length>760)parts.splice(0,parts.length-760);
+    for(var r=rings.length-1;r>=0;r--){ var rg=rings[r]; rg.r+=(rg.R-rg.r)*Math.min(1,dt*12)+dt*120; rg.life-=dt*2; if(rg.life<=0)rings.splice(r,1); }
+    for(var l=lines.length-1;l>=0;l--){ var ln=lines[l]; ln.life-=dt*4; if(ln.life<=0)lines.splice(l,1); }
+    if(pendingFull && !dead){ fullChain(); }
+  }
+
+  function gasDot(x,y,r,hue,a){ var gr=g.createRadialGradient(x,y,0,x,y,r);
+    gr.addColorStop(0,'hsla('+hue+',100%,70%,'+a+')'); gr.addColorStop(0.55,'hsla('+hue+',100%,56%,'+(a*0.4)+')'); gr.addColorStop(1,'hsla('+hue+',100%,50%,0)');
+    g.fillStyle=gr; g.beginPath(); g.arc(x,y,r,0,TAU); g.fill(); }
+
+  function draw(){
+    g.globalCompositeOperation='source-over'; g.fillStyle='rgba(5,6,13,0.32)'; g.fillRect(0,0,W,H);
+    var sx=0,sy=0; if(shake>0){ sx=rr(-shake,shake); sy=rr(-shake,shake); shake*=0.86; }
+    g.save(); g.translate(sx,sy);
+    if(!paused&&!dead){ elapsed+=dtg; update(dtg); }
+    g.globalCompositeOperation='lighter';
+    var dens=Math.min(1,enemies.length/200);
+    var bg=g.createRadialGradient(W/2,H/2,0,W/2,H/2,Math.max(W,H)/1.1);
+    bg.addColorStop(0,'hsla(225,60%,'+(7+dens*8)+'%,0.5)'); bg.addColorStop(1,'rgba(0,0,0,0)'); g.fillStyle=bg; g.fillRect(0,0,W,H);
+    for(var p=0;p<parts.length;p++){ var pt=parts[p]; gasDot(pt.x,pt.y,pt.r,pt.hue,pt.life*0.5); }
+    // 链条连线
+    for(var l=0;l<lines.length;l++){ var ln=lines[l]; g.strokeStyle='hsla('+ln.hue+',100%,72%,'+(ln.life*0.7)+')'; g.lineWidth=3; g.beginPath(); g.moveTo(ln.x1,ln.y1); g.lineTo(ln.x2,ln.y2); g.stroke(); }
+    // 环
+    for(var i=0;i<rings.length;i++){ var rg=rings[i]; var gr=g.createRadialGradient(rg.x,rg.y,rg.r*0.6,rg.x,rg.y,rg.r);
+      gr.addColorStop(0,'hsla('+rg.hue+',100%,70%,0)'); gr.addColorStop(0.75,'hsla('+rg.hue+',100%,70%,'+(rg.life*0.6)+')'); gr.addColorStop(1,'hsla('+rg.hue+',100%,70%,0)');
+      g.fillStyle=gr; g.beginPath(); g.arc(rg.x,rg.y,rg.r,0,TAU); g.fill(); }
+    // 敌人
+    for(var e=0;e<enemies.length;e++){ var en=enemies[e]; var hue=en.pol==='ice'?ICE:FIRE;
+      gasDot(en.x,en.y,en.r*1.7*(Math.sin(en.seed*3)*0.12+1),hue,0.6);
+      g.globalCompositeOperation='source-over'; g.fillStyle=en.flash>0?'#fff':(en.pol==='ice'?'#cdecff':'#ffd9b0');
+      g.beginPath(); g.arc(en.x,en.y,en.r*0.36,0,TAU); g.fill(); g.globalCompositeOperation='lighter'; }
+    // 弹珠 + 轨迹
+    for(var b=0;b<balls.length;b++){ var bb=balls[b]; var bh=bb.kind==='ice'?ICE:FIRE;
+      if(bb.trail.length>1){ g.strokeStyle='hsla('+bh+',100%,70%,0.3)'; g.lineWidth=bb===bb?5:5;
+        g.beginPath(); g.moveTo(bb.trail[0].x,bb.trail[0].y); for(var ti=1;ti<bb.trail.length;ti++)g.lineTo(bb.trail[ti].x,bb.trail[ti].y); g.stroke(); }
+      gasDot(bb.x,bb.y,18,bh,0.9); gasDot(bb.x,bb.y,8,bh,1);
+      if(bb.target){ g.strokeStyle='hsla('+bh+',100%,70%,0.18)'; g.lineWidth=2; g.beginPath(); g.moveTo(bb.x,bb.y); g.lineTo(bb.target.x,bb.target.y); g.stroke(); }
+    }
+    // 瞄准
+    if(aim.active && !dead && !paused){
+      var ang=Math.atan2(aim.y-P.y,aim.x-P.x);
+      g.strokeStyle='hsla('+((parity===0)?ICE:FIRE)+',100%,72%,0.4)'; g.lineWidth=3; g.setLineDash([2,12]);
+      g.beginPath(); g.moveTo(P.x,P.y); g.lineTo(P.x+Math.cos(ang)*520,P.y+Math.sin(ang)*520); g.stroke(); g.setLineDash([]);
+      var t=nearest({x:P.x,y:P.y},[],P.jump); if(t){ gasDot(t.x,t.y,t.r*1.9,285,0.35); }
+    }
+    // 玩家冰火双生气核
+    if(!dead){ gasDot(P.x-8,P.y,P.r*1.3,ICE,0.7); gasDot(P.x+8,P.y,P.r*1.3,FIRE,0.7);
+      g.globalCompositeOperation='source-over'; var core=g.createRadialGradient(P.x,P.y,0,P.x,P.y,P.r*0.7);
+      core.addColorStop(0,'rgba(255,255,255,0.98)'); core.addColorStop(1,'rgba(255,255,255,0)'); g.fillStyle=core;
+      g.beginPath(); g.arc(P.x,P.y,P.r*0.7,0,TAU); g.fill();
+      if(P.inv>0){ g.strokeStyle='rgba(255,80,120,'+(P.inv*1.6)+')'; g.lineWidth=2; g.beginPath(); g.arc(P.x,P.y,P.r+6,0,TAU); g.stroke(); }
+      g.globalCompositeOperation='lighter'; }
+    g.globalCompositeOperation='source-over';
+    g.restore();
+    hud();
+  }
+  function hud(){ el('time').textContent=Math.floor(elapsed); el('kills').textContent=kills;
+    el('hp').style.width=(P.hp/P.maxHp*100)+'%'; el('reso').style.width=(P.reso/P.resoMax*100)+'%';
+    el('combo').textContent=combo>2?('连锁 ×'+combo):'';
+    el('cd').style.width=(100-Math.max(0,Math.min(1,fireCd/P.cd))*100)+'%'; }
+
+  function loop(now){ requestAnimationFrame(loop); if(cv.width!==Math.floor((window.innerWidth||800)*DPR)||cv.height!==Math.floor((window.innerHeight||600)*DPR)){ resize(); } dtg=Math.min(0.033,(now-tPrev)/1000||0); tPrev=now; draw(); }
+
+  window.addEventListener('keydown',function(e){ var k=e.key.toLowerCase(); keys[k]=1;
+    if(k===' '){ e.preventDefault(); fire(); }
+    if(k==='p'&&dead!==true&&!el('pick').classList.contains('show'))paused=!paused;
+    if(['arrowup','arrowdown','arrowleft','arrowright'].indexOf(k)>=0)e.preventDefault(); });
+  window.addEventListener('keyup',function(e){ keys[e.key.toLowerCase()]=0; });
+
+  cv.addEventListener('pointerdown',function(e){ aim.x=e.clientX; aim.y=e.clientY; aim.active=true; });
+  cv.addEventListener('pointermove',function(e){ aim.x=e.clientX; aim.y=e.clientY; });
+  window.addEventListener('pointerup',function(e){ if(aim.active){ fire(); } aim.active=false; });
+  cv.addEventListener('touchmove',function(e){ if(e.touches[0]){ aim.x=e.touches[0].clientX; aim.y=e.touches[0].clientY; } e.preventDefault(); },{passive:false});
+
+  el('again').onclick=function(){ reset(); };
+
+  reset(); resize(); draw();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
